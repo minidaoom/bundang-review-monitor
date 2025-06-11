@@ -1,0 +1,41 @@
+name: 🏥 분당제일여성병원 리뷰 모니터링
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: '테스트 모드 실행'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  monitor-reviews:
+    runs-on: ubuntu-latest
+    name: 🔍 리뷰 개수 모니터링
+    
+    steps:
+    - name: 📥 코드 다운로드
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Python 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: 📦 필요한 패키지 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests beautifulsoup4 lxml
+        
+    - name: 🔍 리뷰 개수 확인 및 알림
+      env:
+        RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+        GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TEST_MODE: ${{ github.event.inputs.test_mode }}
+      run: |
+        python monitor_cloud.py
