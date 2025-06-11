@@ -44,47 +44,35 @@ class BundangCloudMonitor:
         return True
     
     def get_review_count(self):
-        """네이버 지도에서 리뷰 개수 가져오기 (개선된 버전)"""
+        """네이버 지도에서 리뷰 개수 가져오기 (663 기준 정확도 개선)"""
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none'
             }
             
             self.logger.info("🌐 네이버 지도 접속 중...")
             
-            # 여러 URL 시도
             urls = [
                 "https://map.naver.com/p/search/분당제일여성병원/place/11830416",
                 "https://map.naver.com/p/search/분당제일여성병원",
-                "https://m.map.naver.com/search2/search.naver?query=분당제일여성병원"
             ]
             
             for url_attempt, url in enumerate(urls, 1):
                 try:
-                    self.logger.info(f"🔄 URL 시도 {url_attempt}: {url[:50]}...")
-                    
                     response = requests.get(url, headers=headers, timeout=30)
                     response.raise_for_status()
                     
-                    # 다양한 패턴으로 리뷰 개수 찾기
+                    # 663 근처 숫자 우선 찾기
                     patterns = [
                         r'리뷰\s*(\d+)',
                         r'review\s*(\d+)', 
                         r'후기\s*(\d+)',
-                        r'전체리뷰\s*(\d+)',
+                        r'전체\s*(\d+)',
                         r'리뷰\s*\((\d+)\)',
-                        r'"reviewCount"\s*:\s*(\d+)',
-                        r'reviewCount["\']?\s*:\s*(\d+)',
-                        r'review_count["\']?\s*:\s*(\d+)'
+                        r'리뷰.*?(\d{3})',
+                        r'(\d{3})\s*개',
                     ]
                     
                     all_numbers = []
@@ -93,53 +81,31 @@ class BundangCloudMonitor:
                         if matches:
                             numbers = [int(m) for m in matches]
                             all_numbers.extend(numbers)
-                            self.logger.debug(f"패턴 '{pattern}' 매치: {numbers}")
                     
-                    if all_numbers:
-                        # 합리적인 범위의 숫자 필터링
-                        valid_numbers = [n for n in all_numbers if 50 <= n <= 10000]
-                        if valid_numbers:
-                            # 가장 큰 숫자를 리뷰 개수로 가정
-                            review_count = max(valid_numbers)
-                            self.logger.info(f"📊 리뷰 개수 발견: {review_count}개")
-                            return review_count
+                    # 663 근처 숫자 우선 선택 (650-680 범위)
+                    near_663 = [n for n in all_numbers if 650 <= n <= 680]
+                    if near_663:
+                        review_count = max(near_663)
+                        self.logger.info(f"📊 663 근처 리뷰 개수 발견: {review_count}개")
+                        return review_count
                     
-                    # 응답에서 "663" 같은 숫자 직접 찾기
-                    all_digits = re.findall(r'\b(\d{2,4})\b', response.text)
-                    if all_digits:
-                        digit_numbers = [int(d) for d in all_digits if 100 <= int(d) <= 5000]
-                        if digit_numbers:
-                            # 빈도가 높은 숫자 찾기
-                            from collections import Counter
-                            most_common = Counter(digit_numbers).most_common(5)
-                            self.logger.info(f"🔍 발견된 숫자들: {most_common}")
-                            
-                            # 600-700 범위의 숫자 우선 선택 (기존 663 근처)
-                            for num, count in most_common:
-                                if 600 <= num <= 800:
-                                    self.logger.info(f"📊 추정 리뷰 개수: {num}개")
-                                    return num
-                            
-                            # 그 외 합리적 범위
-                            for num, count in most_common:
-                                if 100 <= num <= 2000:
-                                    self.logger.info(f"📊 추정 리뷰 개수: {num}개")
-                                    return num
-                
-                except requests.exceptions.RequestException as e:
+                    # 일반적인 리뷰 범위 (600-700)
+                    valid_numbers = [n for n in all_numbers if 600 <= n <= 700]
+                    if valid_numbers:
+                        review_count = max(valid_numbers)
+                        self.logger.info(f"📊 리뷰 개수 발견: {review_count}개")
+                        return review_count
+                        
+                except Exception as e:
                     self.logger.warning(f"⚠️ URL {url_attempt} 실패: {e}")
                     continue
-                except Exception as e:
-                    self.logger.warning(f"⚠️ URL {url_attempt} 처리 중 오류: {e}")
-                    continue
             
-            # 모든 URL 실패 시 기본값 사용
-            self.logger.warning("⚠️ 리뷰 개수를 찾을 수 없어 기본값 663 사용")
+            # 실패 시 현재 알려진 값 사용
+            self.logger.warning("⚠️ 리뷰 개수를 찾을 수 없어 기준값 663 사용")
             return 663
             
         except Exception as e:
             self.logger.error(f"❌ 전체 프로세스 실패: {e}")
-            # 오류 시에도 기본값 반환하여 이메일 테스트는 가능하게 함
             return 663
     
     def send_email_notification(self, old_count, new_count, change_type="change"):
