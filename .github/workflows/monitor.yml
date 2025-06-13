@@ -2,14 +2,19 @@ name: 🏥 분당제일여성병원 리뷰 모니터링
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/5 * * * *'  # 5분마다 실행
   workflow_dispatch:
     inputs:
       test_mode:
-        description: '테스트 모드 실행'
+        description: '테스트 모드 실행 (강제 알림 발송)'
         required: false
         default: 'false'
         type: boolean
+      change_threshold:
+        description: '최소 변화량 (개)'
+        required: false
+        default: '1'
+        type: string
 
 jobs:
   monitor-reviews:
@@ -17,25 +22,76 @@ jobs:
     name: 🔍 리뷰 개수 모니터링
     
     steps:
-    - name: 📥 코드 다운로드
+    - name: 📥 코드 체크아웃
       uses: actions/checkout@v4
-      
-    - name: 🐍 Python 설정
+      with:
+        fetch-depth: 0  # 전체 히스토리
+        
+    - name: 🐍 Python 환경 설정
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
+        cache: 'pip'  # pip 캐시 활성화
         
-    - name: 📦 필요한 패키지 설치
+    - name: 📦 의존성 설치
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 lxml
+        pip install requests
         
-    - name: 🔍 리뷰 개수 확인 및 알림
+    - name: 🔍 리뷰 모니터링 실행
       env:
+        # 이메일 설정
         RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
         GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+        
+        # GitHub 설정
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        TEST_MODE: ${{ github.event.inputs.test_mode }}
+        
+        # 🎯 스마트 알림 설정
+        TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
+        MIN_CHANGE_THRESHOLD: ${{ github.event.inputs.change_threshold || '1' }}
+        QUIET_MODE: 'true'              # 변화없으면 조용
+        NOTIFY_NO_CHANGE: 'false'       # 무변화 알림 차단
+        NOTIFY_STARTUP: 'false'         # 시작 알림 차단
+        
       run: |
+        echo "🎯 모니터링 설정:"
+        echo "- 테스트 모드: $TEST_MODE"
+        echo "- 최소 변화량: $MIN_CHANGE_THRESHOLD개"
+        echo "- 조용한 모드: $QUIET_MODE"
+        echo ""
         python monitor_cloud.py
+        
+    - name: 📊 결과 파일 커밋
+      if: always()  # 실패해도 결과 저장
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "GitHub Actions Bot"
+        
+        # 변경사항이 있는 경우에만 커밋
+        if [ -n "$(git status --porcelain)" ]; then
+          git add review_history.json monitor.log
+          git commit -m "📊 리뷰 모니터링 업데이트 - $(date +'%Y-%m-%d %H:%M:%S KST')" || true
+          git push || true
+          echo "✅ 모니터링 결과 저장 완료"
+        else
+          echo "📝 변경사항 없음 - 커밋 스킵"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: 📈 실행 결과 요약
+      if: always()
+      run: |
+        echo "🎉 모니터링 작업 완료!"
+        echo "📅 실행 시간: $(date +'%Y-%m-%d %H:%M:%S KST')"
+        if [ -f "review_history.json" ]; then
+          echo "📊 히스토리 파일 크기: $(wc -l < review_history.json) 줄"
+        fi
+        if [ -f "monitor.log" ]; then
+          echo "📝 로그 파일 크기: $(wc -l < monitor.log) 줄"
+          echo ""
+          echo "🔍 최근 로그:"
+          tail -5 monitor.log || true
+        fi
